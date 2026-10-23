@@ -1,0 +1,201 @@
+import os
+import re
+import asyncio
+import base64
+import logging
+import threading
+from pathlib import Path
+from typing import Optional, Dict, Any
+import edge_tts
+from backend.config import settings
+
+logger = logging.getLogger("ARHIEA.TTS")
+
+def clean_text_for_speech(text: str) -> str:
+    """
+    Strips all markdown symbols (###, ##, #, *, **, __, code blocks, emojis, URLs, etc.)
+    so that Edge-TTS and SAPI produce 100% natural, human-like voice synthesis without
+    pronouncing symbols like 'hash hash hash', 'number sign', or 'asterisk'.
+    """
+    if not text or not text.strip():
+        return ""
+
+    s = text.strip()
+
+    # 1. Replace multiline code blocks (```...```) with a spoken placeholder
+    s = re.sub(r"```[\s\S]*?```", " Here is the code. ", s)
+
+    # 2. Strip inline code backticks `code` -> code
+    s = re.sub(r"`([^`]+)`", r"\1", s)
+
+    # 3. Strip all markdown headers: ### Header, ## Header, # Header
+    s = re.sub(r"(?m)^\s*#{1,6}\s*", "", s)
+    s = re.sub(r"#+", "", s)
+
+    # 4. Strip blockquote alerts (> [!NOTE], > [!TIP], etc.) and blockquotes
+    s = re.sub(r">\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"(?m)^\s*>\s*", "", s)
+
+    # 5. Convert markdown links [title](url) -> title
+    s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
+
+    # 6. Simplify raw URLs: https://domain.com/path -> domain.com
+    s = re.sub(r"https?://(?:www\.)?([a-zA-Z0-9.-]+)(?:/[^\s]*)?", r"\1", s)
+
+    # 7. Strip bold, italic, strikethrough markers
+    s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
+    s = re.sub(r"\*([^*]+)\*", r"\1", s)
+    s = re.sub(r"__([^_]+)__", r"\1", s)
+    s = re.sub(r"_([^_]+)_", r"\1", s)
+    s = re.sub(r"~~([^~]+)~~", r"\1", s)
+
+    # 8. Strip bullet point markers (- , * , + )
+    s = re.sub(r"(?m)^\s*[-*+]\s+", "", s)
+
+    # 9. Strip emojis so speech synthesizer doesn't pronounce emoji names
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F680-\U0001F6FF"  # transport & map symbols
+        "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+        "\U00002702-\U000027B0"
+        "\U000024C2-\U0001F251"
+        "\U0001F900-\U0001F9FF"
+        "\U0001FA00-\U0001FA6F"
+        "\U0001FA70-\U0001FAFF"
+        "]+",
+        flags=re.UNICODE
+    )
+    s = emoji_pattern.sub("", s)
+
+    # 10. Normalize multiple line breaks and dots into clean sentence pauses
+    s = re.sub(r"[\r\n]+", ". ", s)
+    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"\.{2,}", ".", s)
+    s = re.sub(r"\.\s*\.", ".", s)
+
+    return s.strip()
+
+def _sapi_save_worker(text: str, wav_path: str):
+    """Worker function for offline Windows SAPI running in isolated thread."""
+    try:
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+        except Exception:
+            pass
+
+        import pyttsx3
+        engine = pyttsx3.init()
+        engine.setProperty('rate', 185)
+        engine.save_to_file(text, wav_path)
+        engine.runAndWait()
+    except Exception as e:
+        logger.warning(f"pyttsx3 worker notice: {e}")
+    finally:
+        try:
+            import pythoncom
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+
+class TTSService:
+    def __init__(self):
+        self.is_speaking: bool = False
+        self.cancel_requested: bool = False
+        self.audio_cache_dir = Path(settings.BASE_DIR) / "data" / "tts_cache"
+        self.audio_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def cancel(self):
+        """Immediately interrupts any in-progress speech (barge-in)."""
+        self.cancel_requested = True
+        self.is_speaking = False
+        logger.info("TTS playback cancelled.")
+
+    async def generate_speech_audio_base64(self, text: str) -> Optional[str]:
+        """
+        Generates MP3/WAV audio from text using Edge-TTS or pyttsx3 fallback.
+        Guaranteed non-blocking with strict timeout to prevent backend hanging.
+        """
+        if not text or not text.strip():
+            return None
+
+        clean_text = clean_text_for_speech(text)
+        if not clean_text:
+            return None
+
+        self.cancel_requested = False
+        self.is_speaking = True
+
+        out_file = self.audio_cache_dir / f"speech_{abs(hash(clean_text)) % 100000}.mp3"
+
+        # 1. Try Edge-TTS first (neural high-quality voice) with 4.5s timeout
+        try:
+            communicate = edge_tts.Communicate(
+                text=clean_text,
+                voice=settings.TTS_VOICE,
+                rate=settings.TTS_SPEED,
+                pitch=settings.TTS_PITCH
+            )
+            await asyncio.wait_for(communicate.save(str(out_file)), timeout=4.5)
+
+            if out_file.exists() and out_file.stat().st_size > 0:
+                with open(out_file, "rb") as f:
+                    audio_bytes = f.read()
+                return base64.b64encode(audio_bytes).decode("utf-8")
+        except asyncio.TimeoutError:
+            logger.warning("Edge-TTS timed out, attempting offline fallback...")
+        except Exception as e:
+            logger.warning(f"Edge-TTS notice ({e}), attempting offline fallback...")
+
+        # 2. Fallback to offline SAPI pyttsx3 in an isolated thread (3s timeout)
+        try:
+            wav_file = self.audio_cache_dir / f"speech_{abs(hash(clean_text)) % 100000}.wav"
+            await asyncio.wait_for(
+                asyncio.to_thread(_sapi_save_worker, clean_text, str(wav_file)),
+                timeout=3.0
+            )
+
+            if wav_file.exists() and wav_file.stat().st_size > 0:
+                with open(wav_file, "rb") as f:
+                    audio_bytes = f.read()
+                return base64.b64encode(audio_bytes).decode("utf-8")
+        except Exception as ex:
+            logger.debug(f"Offline TTS fallback notice: {ex}")
+
+        # If server-side TTS fails, return None (frontend handles speech via browser SpeechSynthesis)
+        return None
+
+    def speak_offline_direct(self, text: str):
+        """Direct 100% offline speech via Windows SAPI in a background daemon thread."""
+        clean_text = clean_text_for_speech(text)
+        if not clean_text:
+            return
+
+        def _speak():
+            try:
+                try:
+                    import pythoncom
+                    pythoncom.CoInitialize()
+                except Exception:
+                    pass
+
+                import pyttsx3
+                engine = pyttsx3.init()
+                engine.setProperty('rate', 185)
+                engine.say(clean_text)
+                engine.runAndWait()
+            except Exception as e:
+                logger.debug(f"Offline direct speak notice: {e}")
+            finally:
+                try:
+                    import pythoncom
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
+
+        t = threading.Thread(target=_speak, daemon=True)
+        t.start()
+
+tts_service = TTSService()

@@ -1,0 +1,357 @@
+import os
+import json
+import logging
+import datetime
+import dateparser
+import httpx
+from typing import Dict, Any, List, Optional
+from backend.config import settings
+from backend.tools.registry import registry
+from backend.agent.web_search import search_web_summary
+from backend.agent.open_knowledge_engine import synthesize_open_ai_response
+from backend.tools.math_tools import evaluate_math_expression
+from backend.database import SessionLocal
+from backend.models import Conversation, Memory
+
+logger = logging.getLogger("ARHIEA.LLMAgent")
+
+SYSTEM_PROMPT = """You are ARHIEA (Adaptive Road and Human Intelligence Emergency System) — an elite AI personal assistant for Windows designed for SIH2611 / SIH26204.
+You combine the intellectual depth, creativity, and reasoning of frontier AIs (ChatGPT, Claude, and Gemini) with the voice/HUD presence of JARVIS and full computer-use capabilities.
+
+CORE DIRECTIVES:
+1. BE FULLY OPEN, COMPREHENSIVE, AND DEEPLY INFORMATIVE:
+   - When the user asks questions, seeks explanations, requests code, advice, comparisons, analysis, or creative writing, be totally open, thorough, and detailed just like frontier AIs (ChatGPT, Claude, Gemini).
+   - Never artificially truncate your answers to 1-2 sentences. Deliver rich, multi-paragraph explanations with in-depth technical facts, structured bullet points, step-by-step reasoning, and syntax-highlighted code blocks (`python`, `javascript`, etc.).
+   - Only keep responses brief when giving a simple operational confirmation for an OS command (e.g., "Done. Spotify is open.") or when the user explicitly asks for a short summary.
+2. NATURAL CONVERSATIONAL OPENING & CLEAN FORMATTING:
+   - Begin answers with a natural, engaging conversational sentence or paragraph. Never start the very first line of your response with '#' or '###'. Use bold headers (e.g. **Overview:**, **Key Insights:**) or clean subheadings for sections, lists, tables, callouts, and syntax-highlighted code blocks for superior readability.
+3. COMPUTER CONTROL & TOOLS:
+   - When performing computer actions (launching apps, creating files, web searches, playing music, drawing in paint, solving math), execute the appropriate registered tool and speak a natural confirmation.
+4. FILES & CODE:
+   - When asked to create files or code, provide complete, production-ready, fully working implementations.
+5. REMINDERS:
+   - Reminders must be user-defined. If the user doesn't specify when, ask "When should I remind you?".
+6. REAL CLOCK:
+   - Always use actual system time/date from get_system_time / get_system_date.
+7. CONTEXT & MEMORY:
+   - Maintain multi-turn conversational context and remember user preferences.
+"""
+
+class ArhieaAgent:
+    def __init__(self):
+        self.conversation_history: List[Dict[str, Any]] = []
+        self.dictation_buffer: List[str] = []
+        self.is_dictating: bool = False
+        self.last_pending_task: Optional[str] = None
+
+    def start_dictation(self):
+        self.is_dictating = True
+        self.dictation_buffer = []
+        return "Dictation started. I am listening continuously."
+
+    def stop_dictation(self) -> str:
+        self.is_dictating = False
+        accumulated = " ".join(self.dictation_buffer)
+        return f"Dictation stopped. Collected {len(self.dictation_buffer)} spoken segments."
+
+    def append_dictation_text(self, text: str):
+        if self.is_dictating and text.strip():
+            self.dictation_buffer.append(text.strip())
+
+    def get_dictation_content(self) -> str:
+        return "\n".join(self.dictation_buffer)
+
+    def _get_persistent_memories_context(self) -> str:
+        db = SessionLocal()
+        try:
+            mems = db.query(Memory).all()
+            if not mems:
+                return ""
+            mem_lines = [f"- {m.key}: {m.value}" for m in mems]
+            return "\nUSER PREFERENCES & MEMORIES:\n" + "\n".join(mem_lines)
+        finally:
+            db.close()
+
+    async def process_message(self, user_input: str, is_voice: bool = False) -> Dict[str, Any]:
+        text = user_input.strip()
+        t_low = text.lower()
+
+        # Handle Dictation Mode Commands
+        if t_low in ["start dictation", "begin dictation"]:
+            msg = self.start_dictation()
+            return {"response": msg, "tool": "dictation_start", "verified": True}
+        if t_low in ["stop dictation", "end dictation"]:
+            msg = self.stop_dictation()
+            return {"response": msg, "tool": "dictation_stop", "verified": True}
+
+        # Check if user is replying with a time to a previous "When should I remind you?" question
+        if self.last_pending_task:
+            task = self.last_pending_task
+            parsed_time = dateparser.parse(
+                text.replace("/", ":"),
+                settings={'RELATIVE_BASE': datetime.datetime.now(), 'PREFER_DATES_FROM': 'future'}
+            )
+            # Only treat as reminder time if parsing succeeded or text looks like time specification
+            if parsed_time and any(w in t_low for w in ["at", "pm", "am", "tomorrow", "today", "minute", "hour", "clock", "morning", "evening", ":", "in "]):
+                self.last_pending_task = None
+                tool_res = await registry.execute("create_reminder", {"text": task, "time_str": text})
+                res_data = tool_res.get("result", {})
+                msg = res_data.get("message", "Reminder set.")
+                return {"response": msg, "tool": "create_reminder", "verified": tool_res.get("verified", False)}
+            else:
+                self.last_pending_task = None
+
+        # 1. Try Gemini Direct API Key if provided
+        if settings.GEMINI_API_KEY and not settings.OPENROUTER_API_KEY:
+            gemini_res = await self._call_gemini_direct(text)
+            if gemini_res:
+                return gemini_res
+
+        # 2. Try OpenRouter / Other AI Models if configured
+        if settings.OPENROUTER_API_KEY:
+            openrouter_res = await self._call_openrouter_agent(text)
+            if openrouter_res:
+                return openrouter_res
+
+        # 3. High-Intelligence Autonomous Knowledge Engine & Tools
+        return await self._handle_offline_agent(text)
+
+    async def _call_openrouter_agent(self, text: str) -> Optional[Dict[str, Any]]:
+        """OpenRouter Multi-AI Agent loop with tool calling."""
+        memories_ctx = self._get_persistent_memories_context()
+        system_content = SYSTEM_PROMPT + (f"\n{memories_ctx}" if memories_ctx else "")
+        if self.dictation_buffer:
+            system_content += f"\n\nCURRENT DICTATED BUFFER:\n{self.get_dictation_content()}"
+
+        messages = [{"role": "system", "content": system_content}]
+        messages.extend(self.conversation_history[-8:])
+        messages.append({"role": "user", "content": text})
+
+        tools_schema = registry.get_all_tools_metadata()
+        tools_schema.append({
+            "type": "function",
+            "function": {
+                "name": "search_web",
+                "description": "Search the live web for current facts, news, weather, stock prices, or events.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"}
+                    },
+                    "required": ["query"]
+                }
+            }
+        })
+
+        headers = {
+            "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://arhiea-assistant.ai",
+            "X-Title": "ARHIEA Assistant"
+        }
+
+        model_name = settings.OPENROUTER_MODEL or "google/gemini-2.5-flash"
+
+        try:
+            for _ in range(3):
+                payload = {
+                    "model": model_name,
+                    "messages": messages,
+                    "tools": tools_schema,
+                    "tool_choice": "auto",
+                    "temperature": 0.4
+                }
+
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{settings.OPENROUTER_BASE_URL}/chat/completions",
+                        headers=headers,
+                        json=payload
+                    )
+
+                if resp.status_code != 200:
+                    logger.warning(f"OpenRouter API returned {resp.status_code}, falling back...")
+                    return None
+
+                data = resp.json()
+                choice = data["choices"][0]
+                message = choice["message"]
+
+                if "tool_calls" in message and message["tool_calls"]:
+                    messages.append(message)
+                    for tool_call in message["tool_calls"]:
+                        fn_name = tool_call["function"]["name"]
+                        fn_args_raw = tool_call["function"].get("arguments", "{}")
+                        try:
+                            fn_args = json.loads(fn_args_raw) if isinstance(fn_args_raw, str) else fn_args_raw
+                        except Exception:
+                            fn_args = {}
+
+                        logger.info(f"OpenRouter invoking tool '{fn_name}'")
+
+                        if fn_name == "search_web":
+                            search_res = search_web_summary(fn_args.get("query", text))
+                            tool_result_str = json.dumps(search_res)
+                        else:
+                            exec_res = await registry.execute(fn_name, fn_args)
+                            tool_result_str = json.dumps(exec_res.get("result", exec_res))
+
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": tool_result_str
+                        })
+                    continue
+
+                final_answer = message.get("content", "")
+                self.conversation_history.append({"role": "user", "content": text})
+                self.conversation_history.append({"role": "assistant", "content": final_answer})
+                self._save_conversation(text, final_answer)
+
+                return {"response": final_answer, "verified": True}
+        except Exception as e:
+            logger.debug(f"OpenRouter request notice: {e}")
+
+        return None
+
+    async def _call_gemini_direct(self, text: str) -> Optional[Dict[str, Any]]:
+        """Direct Google Gemini REST API handler with active model list & fast timeout."""
+        if not settings.GEMINI_API_KEY or not settings.GEMINI_API_KEY.startswith("AIzaSy"):
+            return None
+
+        candidate_models = ["gemini-2.5-flash", "gemini-1.5-flash"]
+        for model in candidate_models:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={settings.GEMINI_API_KEY}"
+                payload = {
+                    "contents": [{"parts": [{"text": f"{SYSTEM_PROMPT}\n\nUser: {text}"}]}],
+                    "generationConfig": {"temperature": 0.4}
+                }
+                async with httpx.AsyncClient(timeout=4.0) as client:
+                    resp = await client.post(url, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts and "text" in parts[0]:
+                            cand = parts[0]["text"]
+                            self.conversation_history.append({"role": "user", "content": text})
+                            self.conversation_history.append({"role": "assistant", "content": cand})
+                            self._save_conversation(text, cand)
+                            return {"response": cand, "verified": True}
+                elif resp.status_code in (400, 401, 403, 404):
+                    logger.debug(f"Gemini API returned status {resp.status_code}, aborting direct Gemini attempts.")
+                    break
+            except Exception as e:
+                logger.debug(f"Gemini API attempt for model {model} notice: {e}")
+                break  # If key or network error occurs, break immediately to avoid lag
+        return None
+
+    async def _handle_offline_agent(self, text: str) -> Dict[str, Any]:
+        """Robust offline handler when cloud LLM is unavailable."""
+        t_low = text.lower()
+
+        # Handle Python calculator creation request
+        if "calculator" in t_low and ("create" in t_low or "make" in t_low):
+            calc_code = (
+                '"""Simple Calculator generated by ARHIEA"""\n\n'
+                'def add(x, y): return x + y\n'
+                'def subtract(x, y): return x - y\n'
+                'def multiply(x, y): return x * y\n'
+                'def divide(x, y):\n'
+                '    if y == 0: return "Error: Division by zero"\n'
+                '    return x / y\n\n'
+                'if __name__ == "__main__":\n'
+                '    print("=== ARHIEA Calculator ===")\n'
+                '    print("10 + 5 =", add(10, 5))\n'
+                '    print("10 - 5 =", subtract(10, 5))\n'
+                '    print("10 * 5 =", multiply(10, 5))\n'
+                '    print("10 / 5 =", divide(10, 5))\n'
+            )
+            res = await registry.execute("create_file", {
+                "filename": "calculator.py",
+                "content": calc_code,
+                "location": "Desktop",
+                "overwrite": True
+            })
+            msg = "Done. Created calculator.py on your Desktop."
+            return {"response": msg, "tool": "create_file", "verified": True}
+
+        # Handle creating file from dictation or notes
+        if "create" in t_low and ("document" in t_low or "text file" in t_low or "word" in t_low or "file" in t_low):
+            content = self.get_dictation_content() or f"Notes recorded by ARHIEA:\n\n{text}"
+            ext = ".docx" if "word" in t_low or "document" in t_low else ".txt"
+            fname = f"ARHIEA_Notes{ext}"
+            res = await registry.execute("create_file", {
+                "filename": fname,
+                "content": content,
+                "location": "Desktop",
+                "overwrite": True
+            })
+            msg = f"Done. Created {fname} on your Desktop containing your notes."
+            return {"response": msg, "tool": "create_file", "verified": True}
+
+        # Greetings and conversational banter
+        if any(w in t_low for w in ["hello", "hi", "hey", "greetings", "good morning", "good evening", "good afternoon"]):
+            if "morning" in t_low:
+                return {"response": "Good morning! How can I assist you today?", "verified": True}
+            elif "evening" in t_low:
+                return {"response": "Good evening! What can I help you with tonight?", "verified": True}
+            elif "afternoon" in t_low:
+                return {"response": "Good afternoon! What are we working on?", "verified": True}
+            return {"response": "Hey! I'm here. What can I do for you?", "verified": True}
+
+        if any(w in t_low for w in ["how are you", "who are you", "what can you do"]):
+            return {
+                "response": "I'm ARHIEA, your Adaptive Road and Human Intelligence Emergency System for Windows. I can control your computer, launch apps, solve mathematics, manage reminders, inspect surroundings via camera, draw in Paint, and assist you with your daily tasks.",
+                "verified": True
+            }
+
+        if any(w in t_low for w in ["thank", "thanks", "great job", "awesome"]):
+            return {
+                "response": "You're very welcome! Let me know if you need anything else.",
+                "verified": True
+            }
+
+        # Mathematical and arithmetic evaluation
+        math_res = evaluate_math_expression(text)
+        if math_res.get("success") or "Division by zero" in math_res.get("message", ""):
+            return {
+                "response": math_res["message"],
+                "tool": "calculate_math",
+                "verified": True
+            }
+
+        # Open Knowledge & Comprehensive Generative Answering Engine
+        open_res = synthesize_open_ai_response(text)
+        if open_res and open_res.get("response"):
+            final_resp = open_res["response"]
+            self.conversation_history.append({"role": "user", "content": text})
+            self.conversation_history.append({"role": "assistant", "content": final_resp})
+            self._save_conversation(text, final_resp)
+            return open_res
+
+        # Fallback to search_web_summary
+        search_res = search_web_summary(text)
+        if search_res.get("success"):
+            return {"response": search_res.get("message", ""), "tool": "web_search", "verified": True}
+
+        return {
+            "response": f"I am here and ready to help with **{text}**. You can ask me any question about science, coding, history, tech, everyday guidance, or system tasks!",
+            "verified": True
+        }
+
+    def _save_conversation(self, user_msg: str, bot_msg: str):
+        db = SessionLocal()
+        try:
+            db.add(Conversation(role="user", content=user_msg))
+            db.add(Conversation(role="assistant", content=bot_msg))
+            db.commit()
+        except Exception as e:
+            logger.error(f"Error saving conversation to database: {e}")
+        finally:
+            db.close()
+
+agent = ArhieaAgent()
+AegisAgent = ArhieaAgent

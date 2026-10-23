@@ -1,0 +1,261 @@
+import pytest
+from backend.agent.router import router
+from backend.database import init_db
+
+@pytest.fixture(autouse=True)
+def setup_db():
+    init_db()
+
+@pytest.mark.asyncio
+async def test_fast_router_system_time_and_date():
+    res_time = await router.route_and_execute("what time is it")
+    assert res_time is not None
+    assert res_time["handled"] is True
+    assert "The current time is" in res_time["response"]
+
+    res_date = await router.route_and_execute("what date is today")
+    assert res_date is not None
+    assert res_date["handled"] is True
+    assert "Today is" in res_date["response"]
+
+@pytest.mark.asyncio
+async def test_fast_router_reminders():
+    # When user says "Remind me to submit my assignment" without time, it MUST ask "When should I remind you?"
+    res_ask = await router.route_and_execute("remind me to submit my assignment")
+    assert res_ask is not None
+    assert res_ask["handled"] is True
+    assert res_ask["response"] == "When should I remind you?"
+
+    # When time is given
+    res_set = await router.route_and_execute("remind me tomorrow at 5 PM to submit my assignment")
+    assert res_set is not None
+    assert res_set["handled"] is True
+    assert "Reminder set" in res_set["response"]
+
+@pytest.mark.asyncio
+async def test_fast_router_maps_and_youtube():
+    res_yt = await router.route_and_execute("play Believer by Imagine Dragons")
+    assert res_yt is not None
+    assert res_yt["handled"] is True
+    assert "Believer by Imagine Dragons" in res_yt["response"]
+    assert res_yt.get("action") == "open_url"
+    assert "youtube.com" in res_yt.get("url", "")
+
+    res_maps = await router.route_and_execute("give me directions to Bangalore Airport")
+    assert res_maps is not None
+    assert res_maps["handled"] is True
+    assert "Bangalore Airport" in res_maps["response"]
+
+@pytest.mark.asyncio
+async def test_fast_router_shutdown():
+    res_bye = await router.route_and_execute("goodbye")
+    assert res_bye is not None
+    assert res_bye["handled"] is True
+    assert "Goodbye" in res_bye["response"]
+    assert res_bye["action"] == "exit_app"
+
+@pytest.mark.asyncio
+async def test_fast_router_greetings_and_banter():
+    # Test "Hello"
+    res_hello = await router.route_and_execute("Hello")
+    assert res_hello is not None
+    assert res_hello["handled"] is True
+    assert "Hey!" in res_hello["response"] or "help" in res_hello["response"].lower()
+
+    # Test "Hey ARHIEA", "Hey AEGIS" & "Hey AURA"
+    res_arhiea = await router.route_and_execute("Hey ARHIEA")
+    assert res_arhiea is not None
+    assert res_arhiea["handled"] is True
+    assert "Hey!" in res_arhiea["response"]
+
+    res_aegis = await router.route_and_execute("Hey AEGIS")
+    assert res_aegis is not None
+    assert res_aegis["handled"] is True
+    assert "Hey!" in res_aegis["response"]
+
+    res_hey = await router.route_and_execute("Hey AURA")
+    assert res_hey is not None
+    assert res_hey["handled"] is True
+    assert "Hey!" in res_hey["response"]
+
+    # Test "How are you?"
+    res_how = await router.route_and_execute("How are you?")
+    assert res_how is not None
+    assert res_how["handled"] is True
+    assert "great" in res_how["response"].lower()
+
+    # Test "Thank you"
+    res_thanks = await router.route_and_execute("Thank you")
+    assert res_thanks is not None
+    assert res_thanks["handled"] is True
+    assert "welcome" in res_thanks["response"].lower()
+
+@pytest.mark.asyncio
+async def test_fast_router_math_problems():
+    # Test "2*2"
+    res_mul = await router.route_and_execute("2*2")
+    assert res_mul is not None
+    assert res_mul["handled"] is True
+    assert "4" in res_mul["response"]
+
+    # Test "what is 25 * 4"
+    res_expr = await router.route_and_execute("what is 25 * 4")
+    assert res_expr is not None
+    assert res_expr["handled"] is True
+    assert "100" in res_expr["response"]
+
+    # Test "15% of 200"
+    res_pct = await router.route_and_execute("15% of 200")
+    assert res_pct is not None
+    assert res_pct["handled"] is True
+    assert "30" in res_pct["response"]
+
+    # Test "sqrt(144)"
+    res_sqrt = await router.route_and_execute("sqrt(144)")
+    assert res_sqrt is not None
+    assert res_sqrt["handled"] is True
+    assert "12" in res_sqrt["response"]
+
+@pytest.mark.asyncio
+async def test_fast_router_vision_and_object_queries():
+    from backend.services.visual_memory import visual_memory_engine
+    
+    # Pre-populate memory with bottle
+    visual_memory_engine.store_observation(
+        object_name="bottle",
+        location_context="on the desk",
+        room="workspace",
+        spatial_relationship="next to the keyboard",
+        confidence=0.95
+    )
+
+    # Test "where is my bottle"
+    res_find = await router.route_and_execute("where is my bottle")
+    assert res_find is not None
+    assert res_find["handled"] is True
+    assert "bottle" in res_find["response"].lower()
+    assert "desk" in res_find["response"].lower()
+
+    # Test "where did I put my keys" (not found, camera off)
+    res_keys = await router.route_and_execute("where did I put my keys")
+    assert res_keys is not None
+    assert res_keys["handled"] is True
+
+    # Test "detect objects" router handling
+    res_detect = await router.route_and_execute("detect objects")
+    assert res_detect is not None
+    assert res_detect["handled"] is True
+
+@pytest.mark.asyncio
+async def test_fast_router_advanced_math():
+    # Linear equation
+    res_lin = await router.route_and_execute("solve 2x + 5 = 15")
+    assert res_lin is not None
+    assert res_lin["handled"] is True
+    assert "x = 5" in res_lin["response"]
+
+    # Quadratic equation
+    res_quad = await router.route_and_execute("x^2 - 5x + 6 = 0")
+    assert res_quad is not None
+    assert res_quad["handled"] is True
+    assert ("x = 3" in res_quad["response"] and "x = 2" in res_quad["response"])
+
+    # Number theory: GCD
+    res_gcd = await router.route_and_execute("gcd of 48 and 18")
+    assert res_gcd is not None
+    assert res_gcd["handled"] is True
+    assert "6" in res_gcd["response"]
+
+    # Number theory: Primality
+    res_prime = await router.route_and_execute("is 29 a prime number?")
+    assert res_prime is not None
+    assert res_prime["handled"] is True
+    assert "prime" in res_prime["response"].lower()
+
+    # Statistics: Mean
+    res_mean = await router.route_and_execute("mean of 10, 20, 30, 40")
+    assert res_mean is not None
+    assert res_mean["handled"] is True
+    assert "25" in res_mean["response"]
+
+    # Geometry: Hypotenuse
+    res_hyp = await router.route_and_execute("hypotenuse with sides 3 and 4")
+    assert res_hyp is not None
+    assert res_hyp["handled"] is True
+    assert "5" in res_hyp["response"]
+
+    # Conversions: Celsius to Fahrenheit
+    res_c2f = await router.route_and_execute("convert 100 celsius to fahrenheit")
+    assert res_c2f is not None
+    assert res_c2f["handled"] is True
+    assert "212" in res_c2f["response"]
+
+    # Number theory: Prime factors
+    res_factors = await router.route_and_execute("prime factors of 60")
+    assert res_factors is not None
+    assert res_factors["handled"] is True
+    assert "2^2" in res_factors["response"]
+
+    # Geometry: Circle area
+    res_circle = await router.route_and_execute("area of circle with radius 7")
+    assert res_circle is not None
+    assert res_circle["handled"] is True
+    assert "153.9" in res_circle["response"]
+
+    # Calculus: Integration of sin x
+    res_int_sin = await router.route_and_execute("integral of sin x")
+    assert res_int_sin is not None
+    assert res_int_sin["handled"] is True
+    assert "-cos(x)" in res_int_sin["response"]
+
+    # Calculus: Integration of cos x
+    res_int_cos = await router.route_and_execute("integrate cos(x)")
+    assert res_int_cos is not None
+    assert res_int_cos["handled"] is True
+    assert "sin(x)" in res_int_cos["response"]
+
+    # Calculus: Differentiation of cos x
+    res_diff_cos = await router.route_and_execute("differentiation of cos x")
+    assert res_diff_cos is not None
+    assert res_diff_cos["handled"] is True
+    assert "-sin(x)" in res_diff_cos["response"]
+
+    # Calculus: Differentiation of sin x
+    res_diff_sin = await router.route_and_execute("derivative of sin(x)")
+    assert res_diff_sin is not None
+    assert res_diff_sin["handled"] is True
+    assert "cos(x)" in res_diff_sin["response"]
+
+    # Calculus: Polynomial derivative
+    res_diff_poly = await router.route_and_execute("derivative of x^3")
+    assert res_diff_poly is not None
+    assert res_diff_poly["handled"] is True
+    assert "3x^2" in res_diff_poly["response"]
+
+    # Calculus: Definite Integral
+    res_def_int = await router.route_and_execute("integrate x^2 from 0 to 3")
+    assert res_def_int is not None
+    assert res_def_int["handled"] is True
+    assert "9" in res_def_int["response"]
+
+    # Calculus: Limit
+    res_lim = await router.route_and_execute("limit of sin(x)/x as x approaches 0")
+    assert res_lim is not None
+    assert res_lim["handled"] is True
+    assert "1" in res_lim["response"]
+
+    # Linear Algebra: Dot Product & Custom Log
+    res_dot = await router.route_and_execute("dot product of [1, 2, 3] and [4, 5, 6]")
+    assert res_dot is not None
+    assert res_dot["handled"] is True
+    assert "32" in res_dot["response"]
+
+    res_log = await router.route_and_execute("log base 2 of 32")
+    assert res_log is not None
+    assert res_log["handled"] is True
+    assert "5" in res_log["response"]
+
+
+
+
+

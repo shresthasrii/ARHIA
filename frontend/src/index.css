@@ -1,0 +1,192 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.5);
+}
+
+/* Glassmorphism Styles */
+.glass-panel {
+  background: rgba(17, 23, 38, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-card {
+  background: rgba(26, 34, 52, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(0, 240, 255, 0.12);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.35);
+}
+
+.glow-rose {
+  box-shadow: 0 0 20px rgba(244, 63, 94, 0.35);
+}
+
+/* Accessibility Modes */
+.high-contrast {
+  --tw-bg-opacity: 1 !important;
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+.high-contrast .glass-panel, .high-contrast .glass-card {
+  background-color: #000000 !important;
+  border: 2px solid #00ffff !important;
+}
+.high-contrast button {
+  border: 2px solid #ffffff !important;
+}
+
+.large-font {
+  font-size: 1.15rem !important;
+}
+.large-font h1 { font-size: 2.2rem !important; }
+.large-font h2 { font-size: 1.7rem !important; }
+.large-font h3 { font-size: 1.4rem !important; }
+.large-font p, .large-font span, .large-font button, .large-font input { font-size: 1.15rem !important; }
+
+.font-dyslexic {
+  font-family: 'OpenDyslexic', 'Comic Sans MS', sans-serif !important;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes spinSlow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-spin-slow {
+  animation: spinSlow 12s linear infinite;
+}
+
+/* Futuristic Cybernetic Aesthetics */
+.cyber-grid {
+  background-size: 40px 40px;
+  background-image: 
+    linear-gradient(to right, rgba(56, 189, 248, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
+}
+
+.cyber-card {
+  background: rgba(13, 19, 33, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(56, 189, 248, 0.15);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5), 0 0 15px -3px rgba(6, 182, 212, 0.08);
+}
+
+.cyber-card-user {
+  background: rgba(30, 27, 75, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(129, 140, 248, 0.25);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5), 0 0 15px -3px rgba(99, 102, 241, 0.12);
+}
+
+.cyber-card:hover {
+  border-color: rgba(56, 189, 248, 0.35);
+  box-shadow: 0 4px 25px -2px rgba(0, 0, 0, 0.6), 0 0 20px -2px rgba(6, 182, 212, 0.16);
+}
+
+.glow-cyan-lg {
+  box-shadow: 0 0 35px rgba(6, 182, 212, 0.3);
+}
+
+.glow-indigo-lg {
+  box-shadow: 0 0 35px rgba(99, 102, 241, 0.3);
+}
+
+.glow-emerald-lg {
+  box-shadow: 0 0 35px rgba(16, 185, 129, 0.3);
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.03); }
+}
+
+@keyframes spinReverseSlow {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 3s ease-in-out infinite;
+}
+
+.animate-spin-reverse-slow {
+  animation: spinReverseSlow 16s linear infinite;
+}
+
+/* Smooth selection styling */
+::selection {
+  background: rgba(6, 182, 212, 0.3);
+  color: #ffffff;
+}
+
+/* Google Sign-In Material Progress Bar */
+@keyframes googleProgress {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(20%); }
+  100% { transform: translateX(100%); }
+}
+
+.google-loader-bar {
+  background: linear-gradient(
+    90deg,
+    #4285F4 0%,
+    #EA4335 30%,
+    #FBBC05 65%,
+    #34A853 100%
+  );
+  animation: googleProgress 1.4s ease-in-out infinite;
+}
+
+/* Smooth Tab Glider */
+.smooth-tab-glider {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Subtle Shimmer */
+@keyframes softShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0) 100%);
+  background-size: 200% 100%;
+  animation: softShimmer 2.5s infinite;
+}
