@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Mic, Send, Camera, Bell, Workflow, Settings as SettingsIcon,
-  Layers, Volume2, Sparkles, AlertCircle, ShieldAlert, Cpu, User, LogIn, Sliders
+  Layers, Volume2, Sparkles, AlertCircle, ShieldAlert, Cpu, User, LogIn, Sliders, Brain
 } from 'lucide-react';
 import { wsService } from './services/websocket';
 import { ChatMessage, AssistantState } from './types';
@@ -18,6 +18,8 @@ import { AccessibilityBar } from './components/AccessibilityBar';
 import { AuraCore } from './components/AuraCore';
 import { IntroModal } from './components/IntroModal';
 import { AuthModal, UserProfileData } from './components/AuthModal';
+import { EmergencyDrawer } from './components/EmergencyDrawer';
+import { KnowledgeStudio } from './components/KnowledgeStudio';
 
 export function normalizeSpeechText(text: string): string {
   if (!text) return '';
@@ -87,6 +89,9 @@ export const App: React.FC = () => {
   const [isRoutinesOpen, setIsRoutinesOpen] = useState<boolean>(false);
   const [isVisualMemoryOpen, setIsVisualMemoryOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isEmergencyOpen, setIsEmergencyOpen] = useState<boolean>(false);
+  const [emergencyProtocolTarget, setEmergencyProtocolTarget] = useState<string>('brake_failure');
+  const [isKnowledgeStudioOpen, setIsKnowledgeStudioOpen] = useState<boolean>(false);
   const [remindersRefreshKey, setRemindersRefreshKey] = useState<number>(0);
 
   // Accessibility States
@@ -191,6 +196,12 @@ export const App: React.FC = () => {
         if (data.tool === 'create_reminder' || data.tool === 'delete_reminder') {
           setRemindersRefreshKey((k) => k + 1);
         }
+
+        if (data.action === 'emergency_alert') {
+          setIsEmergencyOpen(true);
+        }
+      } else if (data.type === 'emergency_broadcast') {
+        setIsEmergencyOpen(true);
       } else if (data.type === 'reminder_alert') {
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         setMessages((prev) => [
@@ -376,6 +387,25 @@ export const App: React.FC = () => {
             <Sparkles className="w-4 h-4 text-cyan-400" />
           </button>
 
+          {/* High-Visibility Emergency SOS Button (SIH Core) */}
+          <button
+            onClick={() => setIsEmergencyOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-950/80 border border-red-500/80 hover:bg-red-900/90 text-red-300 text-xs font-bold transition shadow-lg shadow-red-950/60 animate-pulse"
+            title="Emergency SOS & Road Safety Center (SIH26204)"
+          >
+            <ShieldAlert className="w-4 h-4 text-red-400" />
+            <span className="hidden sm:inline">Emergency SOS</span>
+          </button>
+
+          <button
+            onClick={() => setIsKnowledgeStudioOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900/80 border border-slate-700 hover:border-emerald-500/50 text-slate-300 text-xs font-semibold transition"
+            title="AI Neural Brain Studio & Lifelong Learning"
+          >
+            <Brain className="w-4 h-4 text-emerald-400" />
+            <span className="hidden lg:inline">AI Brain</span>
+          </button>
+
           <button
             onClick={handleToggleCamera}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold tracking-wide transition shadow-sm ${
@@ -512,6 +542,15 @@ export const App: React.FC = () => {
         <RoutinesDrawer isOpen={isRoutinesOpen} onClose={() => setIsRoutinesOpen(false)} />
         <VisualMemoryDrawer isOpen={isVisualMemoryOpen} onClose={() => setIsVisualMemoryOpen(false)} />
         <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+        <EmergencyDrawer
+          isOpen={isEmergencyOpen}
+          onClose={() => setIsEmergencyOpen(false)}
+          initialProtocol={emergencyProtocolTarget}
+        />
+        <KnowledgeStudio
+          isOpen={isKnowledgeStudioOpen}
+          onClose={() => setIsKnowledgeStudioOpen(false)}
+        />
 
         {/* Soft Intro Onboarding Modal */}
         <IntroModal

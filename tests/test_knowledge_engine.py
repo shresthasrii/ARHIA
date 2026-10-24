@@ -75,7 +75,7 @@ def test_knowledge_rest_api_lifecycle(client):
     concept_id = data["id"]
 
     # 2. Get list via API
-    get_res = client.get("/api/knowledge?category=Physics & Mechanics")
+    get_res = client.get("/api/knowledge", params={"category": "Physics & Mechanics"})
     assert get_res.status_code == 200
     concepts = get_res.json()["concepts"]
     assert any(c["id"] == concept_id for c in concepts)

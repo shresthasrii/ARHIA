@@ -165,6 +165,215 @@ class FastDeterministicRouter:
                 "verified": True
             }
 
+        # =====================================================================
+        # 0.5 CRITICAL ROAD & MEDICAL EMERGENCY FAST-RESPONSE (<2ms)
+        # =====================================================================
+        # A: Immediate Emergency SOS Trigger
+        if re.search(r"\b(emergency sos|send sos|trigger sos|call emergency|call 112|call 911|call ambulance|i need help urgently|send help|emergency alert)\b", t):
+            tool_res = await registry.execute("trigger_emergency_sos", {
+                "incident_description": raw_text,
+                "severity": "CRITICAL"
+            })
+            res_data = tool_res.get("result", {})
+            formatted_text = (
+                f"🚨 **EMERGENCY SOS DISPATCH INITIATED!**\n\n"
+                f"**Location**: {res_data.get('location')}\n"
+                f"**Coordinates**: {res_data.get('coordinates', {}).get('lat')}, {res_data.get('coordinates', {}).get('lon')}\n"
+                f"**Incident Summary**: {raw_text}\n"
+                f"**Emergency Report**: Saved to `{res_data.get('report_saved_to')}`\n\n"
+                f"### **Verified Emergency Hotlines (Call Immediately)**:\n"
+                f"- **National All-in-One Emergency**: **112** (India / EU) | **911** (US)\n"
+                f"- **Ambulance / Medical Response**: **108**\n"
+                f"- **Police Dispatch**: **100**\n"
+                f"- **National Highway Patrol (NHAI)**: **1073**\n\n"
+                f"> [!IMPORTANT]\n"
+                f"> Stay on the line with 112. An official incident report with your medical profile has been saved to your Desktop."
+            )
+            return {
+                "handled": True,
+                "response": formatted_text,
+                "tool": "trigger_emergency_sos",
+                "emergency_data": res_data,
+                "action": "emergency_alert",
+                "verified": True
+            }
+
+        # B: Vehicle Crisis: Brake Failure
+        if re.search(r"\b(brake(s)? (failed|not working|stopped working|broken|gone)|car won'?t stop|cannot stop car|how to stop without brakes)\b", t):
+            tool_res = await registry.execute("get_emergency_protocol", {"emergency_type": "brake_failure"})
+            res_data = tool_res.get("result", {})
+            resp = (
+                f"🚨 **VEHICLE BRAKE FAILURE EMERGENCY PROTOCOL**\n\n"
+                f"> [!CAUTION]\n> **DO NOT TURN OFF YOUR ENGINE.** Turning off the ignition locks your steering wheel!\n\n"
+                f"### **Immediate Action Steps**:\n"
+                f"1. **Pump the Brake Pedal Rapidly**: Dual-split hydraulic lines may rebuild pressure after 3–4 firm pumps.\n"
+                f"2. **Downshift Progressively (Engine Braking)**: Shift sequentially (5th -> 4th -> 3rd -> 2nd -> 1st) to force the engine compression to slow you down.\n"
+                f"3. **Apply Emergency Handbrake Gently**: Below 40 km/h, pull the handbrake lever gradually while holding the ratchet release button to avoid locking rear wheels.\n"
+                f"4. **Seek Soft Runoff Friction**: Steer towards gravel shoulders, grass verges, or gentle upward slopes.\n"
+                f"5. **Alert Surroundings**: Switch on hazard warning flashers and sound your horn continuously to warn other motorists."
+            )
+            return {
+                "handled": True,
+                "response": resp,
+                "tool": "get_emergency_protocol",
+                "emergency_data": res_data,
+                "action": "emergency_alert",
+                "verified": True
+            }
+
+        # C: Vehicle Crisis: Aquaplaning / Hydroplaning
+        if re.search(r"\b(aquaplaning|hydroplaning|car skidding on water|sliding on wet road|skidding in rain)\b", t):
+            tool_res = await registry.execute("get_emergency_protocol", {"emergency_type": "aquaplaning"})
+            res_data = tool_res.get("result", {})
+            resp = (
+                f"🌊 **AQUAPLANING / HYDROPLANING RECOVERY PROTOCOL**\n\n"
+                f"> [!CAUTION]\n> **DO NOT SLAM THE BRAKES.** Abrupt braking will cause the vehicle to spin out of control!\n\n"
+                f"### **Recovery Steps**:\n"
+                f"1. **Ease Off Accelerator Smoothly**: Remove your foot from the gas pedal to let aerodynamic drag and rolling friction decelerate the car.\n"
+                f"2. **Hold Steering Wheel Straight**: Keep the wheels aligned with the road direction. Avoid sudden jerky counter-steering.\n"
+                f"3. **Wait for Tread to Bite Water**: As vehicle momentum drops, tyre grooves will disperse the water layer and restore tarmac grip.\n"
+                f"4. **Post-Recovery**: Reduce speed by at least 20 km/h and maintain a 4-second following distance."
+            )
+            return {
+                "handled": True,
+                "response": resp,
+                "tool": "get_emergency_protocol",
+                "emergency_data": res_data,
+                "action": "emergency_alert",
+                "verified": True
+            }
+
+        # D: Vehicle Crisis: Tyre Blowout
+        if re.search(r"\b(tyre (burst|blowout|punctured)|tire (burst|blowout|exploded)|flat tyre at speed)\b", t):
+            tool_res = await registry.execute("get_emergency_protocol", {"emergency_type": "tyre_blowout"})
+            res_data = tool_res.get("result", {})
+            resp = (
+                f"⚠️ **HIGH-SPEED TYRE BLOWOUT PROTOCOL**\n\n"
+                f"> [!CAUTION]\n> **DO NOT SLAM BRAKES.** Hard braking shifts weight onto the compromised rim, risking a rollover!\n\n"
+                f"### **Stabilization Steps**:\n"
+                f"1. **Grip Steering Wheel with Both Hands**: Expect a violent sideways pull towards the flat tyre. Counter-steer firmly to maintain straight path.\n"
+                f"2. **Tap Accelerator Briefly, Then Coast**: Stabilize vehicle inertia, then ease off throttle and let deceleration happen naturally.\n"
+                f"3. **Indicate & Pull Safely Off Highway**: Once under 30 km/h, brake softly, activate hazard warning lights, and park on the hard shoulder.\n"
+                f"4. **Place Warning Triangle 50m Behind Car**: Ensure all passengers exit on the non-traffic side and stand behind crash barriers."
+            )
+            return {
+                "handled": True,
+                "response": resp,
+                "tool": "get_emergency_protocol",
+                "emergency_data": res_data,
+                "action": "emergency_alert",
+                "verified": True
+            }
+
+        # E: Medical Crisis: CPR Protocol
+        if re.search(r"\b(cpr|cardiac arrest|heart stopped|how to do cpr|start cpr|resuscitation|chest compressions|how to perform cpr)\b", t):
+            tool_res = await registry.execute("get_emergency_protocol", {"emergency_type": "cpr"})
+            res_data = tool_res.get("result", {})
+            resp = (
+                f"❤️ **ADULT CARDIOPULMONARY RESUSCITATION (CPR) PROTOCOL**\n\n"
+                f"> [!IMPORTANT]\n> **Call 112 / 108 (India) or 911 (US) immediately.** Put speakerphone on and ask for an AED.\n\n"
+                f"### **Life-Saving Steps**:\n"
+                f"1. **Check Responsiveness**: Tap shoulders firmly and shout 'Are you okay?'. Check for normal breathing (max 10 seconds).\n"
+                f"2. **Hand Position**: Place heel of one hand in the center of the chest (lower half of breastbone). Interlock other hand on top.\n"
+                f"3. **Compression Depth & Rhythm**: Push **hard and fast** (5–6 cm depth) at **100–120 compressions per minute** (cadence of *'Stayin Alive'*).\n"
+                f"4. **30 Compressions : 2 Breaths**: Perform 30 high-quality compressions, tilt head back, pinch nose, deliver 2 gentle 1-second rescue breaths.\n"
+                f"5. **Hands-Only CPR**: If untrained or uncomfortable giving breaths, perform **continuous uninterrupted chest compressions** until paramedics arrive."
+            )
+            return {
+                "handled": True,
+                "response": resp,
+                "tool": "get_emergency_protocol",
+                "emergency_data": res_data,
+                "action": "emergency_alert",
+                "verified": True
+            }
+
+        # F: Medical Crisis: Choking & Heimlich
+        if re.search(r"\b(choking|heimlich|someone is choking|airway blocked|can'?t breathe food)\b", t):
+            tool_res = await registry.execute("get_emergency_protocol", {"emergency_type": "choking_heimlich"})
+            res_data = tool_res.get("result", {})
+            resp = (
+                f"🚨 **CHOKING RELIEF / HEIMLICH MANEUVER PROTOCOL**\n\n"
+                f"1. **Confirm Complete Choking**: Ask 'Are you choking?'. If they cannot speak, cough, or breathe, act immediately.\n"
+                f"2. **5 Back Blows**: Lean victim forward, deliver 5 sharp blows with heel of your hand between shoulder blades.\n"
+                f"3. **5 Abdominal Thrusts (Heimlich)**: Stand behind victim, place thumb side of fist slightly above navel (below ribcage), grasp fist with other hand, pull sharply **inward and upward**.\n"
+                f"4. **Repeat 5 & 5 Cycle**: Alternate 5 back blows and 5 abdominal thrusts until object is dislodged.\n"
+                f"5. **If Victim Becomes Unresponsive**: Lower safely to floor, call 112 / 108, and begin chest compressions (CPR) immediately."
+            )
+            return {
+                "handled": True,
+                "response": resp,
+                "tool": "get_emergency_protocol",
+                "emergency_data": res_data,
+                "action": "emergency_alert",
+                "verified": True
+            }
+
+        # G: Medical Crisis: Severe Burns
+        if re.search(r"\b(burns|severe burn|burned my (hand|arm|skin)|hot water burn|fire burn|chemical burn)\b", t):
+            tool_res = await registry.execute("get_emergency_protocol", {"emergency_type": "burns"})
+            res_data = tool_res.get("result", {})
+            resp = (
+                f"🔥 **THERMAL & CHEMICAL BURNS FIRST AID PROTOCOL**\n\n"
+                f"> [!CAUTION]\n> **DO NOT USE ICE, BUTTER, OR OILS.** Ice damages tissue; oils trap heat inside the dermis.\n\n"
+                f"1. **Cool with Running Water for 20 Minutes**: Run gentle, cool tap water over burn immediately. Do not stop early.\n"
+                f"2. **Remove Constrictive Items**: Take off rings, watches, and tight clothing before tissue swelling occurs.\n"
+                f"3. **Never Pop Blisters**: Intact blisters are a natural sterile barrier against severe bacterial infection.\n"
+                f"4. **Cover Loosely**: Wrap loosely with clean plastic cling film or sterile non-adherent dressing.\n"
+                f"5. **Seek Emergency Care (112/108)**: For burns larger than a palm, charred/white skin, or burns to face, hands, or joints."
+            )
+            return {
+                "handled": True,
+                "response": resp,
+                "tool": "get_emergency_protocol",
+                "emergency_data": res_data,
+                "action": "emergency_alert",
+                "verified": True
+            }
+
+        # H: Medical Crisis: Severe Bleeding
+        if re.search(r"\b(severe bleeding|heavy bleeding|tourniquet|arterial bleeding|blood not stopping|deep cut bleeding)\b", t):
+            tool_res = await registry.execute("get_emergency_protocol", {"emergency_type": "severe_bleeding"})
+            res_data = tool_res.get("result", {})
+            resp = (
+                f"🩸 **SEVERE BLEEDING & TOURNIQUET APPLICATION PROTOCOL**\n\n"
+                f"1. **Continuous Direct Pressure**: Press clean cloth or sterile dressing directly onto wound with both hands. Add more layers if soaked.\n"
+                f"2. **Elevate Wound**: Elevate bleeding limb above heart level (unless fracture suspected).\n"
+                f"3. **Tourniquet for Severe Limb Arterial Bleeding**: Place tourniquet 2–3 inches above wound (between wound and heart). Never place over joints.\n"
+                f"4. **Tighten Until Bleeding Ceases**: Wind the rod until bright red spurting ceases, lock in place, and **note the exact time applied** on the patient's forehead or bandage.\n"
+                f"5. **Prevent Shock**: Lay victim flat, keep warm with blanket, do not give food/drink, and dial 112 / 108 immediately."
+            )
+            return {
+                "handled": True,
+                "response": resp,
+                "tool": "get_emergency_protocol",
+                "emergency_data": res_data,
+                "action": "emergency_alert",
+                "verified": True
+            }
+
+        # I: General Road Accident Triage
+        if re.search(r"\b(car crash|road accident|i was in an accident|accident happened|hit a car|crash reported|golden hour)\b", t):
+            tool_res = await registry.execute("get_emergency_protocol", {"emergency_type": "road_accident"})
+            res_data = tool_res.get("result", {})
+            resp = (
+                f"🚑 **ROAD ACCIDENT GOLDEN HOUR PROTOCOL**\n\n"
+                f"> [!IMPORTANT]\n> The first 60 minutes following trauma dictate survival rates. Act deliberately.\n\n"
+                f"1. **Secure the Scene First**: Switch on hazard flashers, place warning triangles, turn off ignitions to eliminate fire hazards.\n"
+                f"2. **Call Emergency Services (112 / 108)**: Report exact location, number of injured passengers, and vehicle hazards.\n"
+                f"3. **Do NOT Move Injured Casualties (C-Spine)**: Unless immediate fire or submersion hazard exists, keep victim's neck and spine strictly aligned.\n"
+                f"4. **Assess ABC (Airway, Breathing, Circulation)**: Clear mouth obstructions, ensure chest rise, and apply firm direct pressure to heavy bleeding.\n"
+                f"5. **Keep Calm & Warm**: Talk reassuringly, cover victims with blankets to prevent hypothermia, and await emergency services."
+            )
+            return {
+                "handled": True,
+                "response": resp,
+                "tool": "get_emergency_protocol",
+                "emergency_data": res_data,
+                "action": "emergency_alert",
+                "verified": True
+            }
+
         # 1. Goodbye / Self Shutdown
         if is_goodbye_request(t):
             res = await perform_graceful_shutdown()

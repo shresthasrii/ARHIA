@@ -147,6 +147,7 @@ async def process_user_query(user_text: str, is_voice: bool = False) -> Dict[str
     url = None
     booking_data = None
     media_data = None
+    emergency_data = None
 
     if fast_result:
         if "pending_reminder_task" in fast_result:
@@ -159,6 +160,7 @@ async def process_user_query(user_text: str, is_voice: bool = False) -> Dict[str
         url = fast_result.get("url")
         booking_data = fast_result.get("booking_data")
         media_data = fast_result.get("media_data")
+        emergency_data = fast_result.get("emergency_data")
     else:
         # 2. General Agent & Reasoning loop
         await manager.broadcast_json({"type": "state_change", "state": "EXECUTING", "query": clean_text})
@@ -170,6 +172,15 @@ async def process_user_query(user_text: str, is_voice: bool = False) -> Dict[str
         url = agent_result.get("url")
         booking_data = agent_result.get("booking_data")
         media_data = agent_result.get("media_data")
+        emergency_data = agent_result.get("emergency_data")
+
+    # If emergency action, broadcast immediate alert event
+    if action == "emergency_alert":
+        await manager.broadcast_json({
+            "type": "emergency_broadcast",
+            "title": emergency_data.get("title", "EMERGENCY ALERT") if emergency_data else "EMERGENCY ALERT",
+            "emergency_data": emergency_data
+        })
 
     # Broadcast state: SPEAKING
     await manager.broadcast_json({"type": "state_change", "state": "SPEAKING", "response": response_text})
@@ -193,6 +204,7 @@ async def process_user_query(user_text: str, is_voice: bool = False) -> Dict[str
         "url": url,
         "booking_data": booking_data,
         "media_data": media_data,
+        "emergency_data": emergency_data,
         "audio_base64": audio_base64,
         "timestamp": asyncio.get_event_loop().time()
     }
@@ -350,6 +362,37 @@ async def get_knowledge_stats():
 async def seed_knowledge_base():
     count = knowledge_engine.seed_default_knowledge(force=True)
     return {"status": "seeded", "count": count, "stats": knowledge_engine.get_stats()}
+
+# =====================================================================
+# Real-Time Safety & Emergency Response Endpoints (SIH Core)
+# =====================================================================
+@app.get("/api/emergency/hotlines")
+async def get_emergency_hotlines_endpoint():
+    from backend.tools.emergency_tools import EMERGENCY_HOTLINES
+    return {"hotlines": EMERGENCY_HOTLINES}
+
+@app.get("/api/emergency/protocol/{emergency_type}")
+async def get_emergency_protocol_endpoint(emergency_type: str):
+    res = await registry.execute("get_emergency_protocol", {"emergency_type": emergency_type})
+    return res.get("result", {})
+
+@app.post("/api/emergency/sos")
+async def trigger_emergency_sos_endpoint(payload: Optional[Dict[str, Any]] = Body(None)):
+    desc = payload.get("incident_description", "General SOS Emergency Alert triggered by user") if payload else "General SOS Emergency Alert triggered by user"
+    severity = payload.get("severity", "CRITICAL") if payload else "CRITICAL"
+    res = await registry.execute("trigger_emergency_sos", {"incident_description": desc, "severity": severity})
+    res_data = res.get("result", {})
+    await manager.broadcast_json({
+        "type": "emergency_broadcast",
+        "title": "EMERGENCY SOS ALERT",
+        "emergency_data": res_data
+    })
+    return res_data
+
+@app.get("/api/emergency/medical-profile")
+async def get_emergency_medical_profile():
+    from backend.tools.emergency_tools import _get_user_medical_and_emergency_context
+    return {"profile": _get_user_medical_and_emergency_context()}
 
 @app.get("/api/settings")
 async def get_settings():

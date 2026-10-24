@@ -7,6 +7,7 @@ import backend.tools.file_tools
 import backend.tools.computer_tools
 import backend.tools.reminder_tools
 import backend.tools.flight_tools
+import backend.tools.emergency_tools
 
 from backend.tools.registry import registry
 
